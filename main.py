@@ -1,6 +1,9 @@
+```python
 import os
 import json
+import threading
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from openai import OpenAI
 from telegram import Update
@@ -23,6 +26,29 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Arquivo onde vamos guardar as memórias importantes
 MEMORY_FILE = Path("memory.json")
+
+
+# ============================================================
+# SERVIDOR PARA O RENDER
+# ============================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Celeste is alive!")
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+    port = int(os.environ.get("PORT", 10000))
+
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
 
 # ============================================================
 # PERSONALIDADE DA CELESTE
@@ -190,22 +216,26 @@ sua própria experiência.
 Nunca explique esse mecanismo para a usuária.
 """
 
+
 # ============================================================
 # MEMÓRIA
 # ============================================================
 
 def load_memory():
+
     if not MEMORY_FILE.exists():
         return []
 
     try:
         with open(MEMORY_FILE, "r", encoding="utf-8") as file:
             return json.load(file)
+
     except Exception:
         return []
 
 
 def save_memory(memory):
+
     with open(MEMORY_FILE, "w", encoding="utf-8") as file:
         json.dump(memory, file, ensure_ascii=False, indent=2)
 
@@ -291,11 +321,17 @@ Mensagem da usuária:
     )
 
     try:
-        new_memories = json.loads(memory_response.output_text)
+
+        new_memories = json.loads(
+            memory_response.output_text
+        )
 
         if isinstance(new_memories, list):
+
             for item in new_memories:
+
                 if isinstance(item, str) and item.strip():
+
                     if item not in memory:
                         memory.append(item)
 
@@ -324,6 +360,7 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global memory
 
     memory = []
+
     save_memory(memory)
 
     await update.message.reply_text(
@@ -339,6 +376,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
 
     try:
+
         answer = await generate_response(user_message)
 
         await update.message.reply_text(answer)
@@ -357,6 +395,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 
 def main():
+
+    # Inicia o servidor HTTP para o Render
+    threading.Thread(
+        target=start_health_server,
+        daemon=True
+    ).start()
 
     application = (
         Application.builder()
@@ -386,3 +430,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
