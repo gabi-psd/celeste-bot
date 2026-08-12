@@ -24,6 +24,7 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 client = OpenAI(
     api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1"
+)
 
 # Arquivo onde vamos guardar as memórias importantes
 MEMORY_FILE = Path("memory.json")
