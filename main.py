@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from openai import OpenAI
+from groq import AsyncGroq
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -14,6 +14,8 @@ from telegram.ext import (
     filters,
 )
 
+# Dependência necessária: pip install groq python-telegram-bot
+
 # ============================================================
 # CONFIGURAÇÕES
 # ============================================================
@@ -21,10 +23,13 @@ from telegram.ext import (
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
-client = OpenAI(
+client = AsyncGroq(
     api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
 )
+
+# Modelo usado pela API do Groq.
+# Pode ser sobrescrito pela variável de ambiente GROQ_MODEL.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # Arquivo onde vamos guardar as memórias importantes
 MEMORY_FILE = Path("memory.json")
@@ -260,36 +265,43 @@ async def generate_response(user_message):
     if not memory_text:
         memory_text = "Ainda não existem memórias importantes registradas."
 
-    response = client.responses.create(
-        model="gpt-5.4-mini",
-        instructions=CELESTE_PROMPT,
-        input=[
+    response = await client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
             {
-                "role": "developer",
+                "role": "system",
+                "content": CELESTE_PROMPT,
+            },
+            {
+                "role": "system",
                 "content": f"""
 Estas são as memórias importantes que você possui sobre a usuária:
 
 {memory_text}
 
 Use-as naturalmente quando forem relevantes.
-"""
+""",
             },
             {
                 "role": "user",
-                "content": user_message
-            }
-        ]
+                "content": user_message,
+            },
+        ],
+        temperature=0.8,
     )
 
-    answer = response.output_text
+    answer = response.choices[0].message.content or ""
 
     # --------------------------------------------------------
     # IDENTIFICAR NOVAS MEMÓRIAS IMPORTANTES
     # --------------------------------------------------------
 
-    memory_response = client.responses.create(
-        model="gpt-5.4-mini",
-        instructions="""
+    memory_response = await client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": """
 Você é responsável por identificar memórias importantes sobre a usuária.
 
 Analise a mensagem abaixo e determine se ela contém alguma informação
@@ -316,17 +328,28 @@ Se não houver nenhuma memória importante, responda:
 []
 
 Não invente informações.
-
-Mensagem da usuária:
 """,
-        input=user_message
+            },
+            {
+                "role": "user",
+                "content": f"Mensagem da usuária:\n{user_message}",
+            },
+        ],
+        temperature=0,
     )
 
     try:
 
-        new_memories = json.loads(
-            memory_response.output_text
-        )
+        raw_memories = (
+            memory_response.choices[0].message.content or "[]"
+        ).strip()
+
+        # Alguns modelos podem envolver o JSON em um bloco de código.
+        if raw_memories.startswith("```"):
+            raw_memories = raw_memories.replace("```json", "", 1)
+            raw_memories = raw_memories.replace("```", "", 1).strip()
+
+        new_memories = json.loads(raw_memories)
 
         if isinstance(new_memories, list):
 
@@ -428,5 +451,7 @@ def main():
     print("Celeste está online 💗")
 
     application.run_polling()
+
+
 if __name__ == "__main__":
     main()
